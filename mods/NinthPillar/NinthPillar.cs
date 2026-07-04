@@ -130,7 +130,9 @@ internal static class NinthPillar
     private static string sfxHookStatus = "not installed";
     private static bool invulnerable;
     private static bool infiniteMana;
-    private static bool muteInBackground = true;
+    // Opt-in: only ever mutes the game's own audio session, but default OFF so
+    // the feature can never surprise anyone. Toggle it on in the F10 menu.
+    private static bool muteInBackground = false;
     private static bool fullHealthOnSpectral = true;
     private static bool fullHealthOnRevive = true;
     private static bool gameMuted;
@@ -436,6 +438,12 @@ internal static class NinthPillar
     private static bool SetMuteAll(int pid, bool mute)
     {
         bool any = false;
+        // Never operate on pseudo-PIDs (0 = System Idle / system-sounds owner,
+        // 4 = System). A real game PID is always well above these; guarding here
+        // makes it impossible to mute the shared system-sounds session even if a
+        // caller ever passed a bad pid.
+        if (pid <= 4)
+            return false;
         try
         {
             IMMDeviceEnumerator deviceEnumerator = (IMMDeviceEnumerator)Activator.CreateInstance(
@@ -467,6 +475,10 @@ internal static class NinthPillar
                 {
                     IAudioSessionControl2 session;
                     if (sessions.GetSession(i, out session) != 0)
+                        continue;
+                    // Never touch the Windows system-sounds session
+                    // (IsSystemSoundsSession returns S_OK==0 when it is).
+                    if (session.IsSystemSoundsSession() == 0)
                         continue;
                     int sessionPid;
                     if (session.GetProcessId(out sessionPid) != 0 || sessionPid != pid)
