@@ -1,0 +1,20 @@
+# Build artifacts
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.log
+
+# Local install state (created by the installer inside the game folder)
+steam_appid.txt
+installed.marker
+SRX.exe
+SRX.*.original.exe
+*.removed-*.exe
+*.bak
+*.bak-*
+
+# The prebuilt NinthPillar.exe / NinthPillarLauncher.exe ARE committed on
+# purpose so the installer works without a compiler. Rebuild with the scripts
+# in mods/NinthPillar/ if you prefer.
