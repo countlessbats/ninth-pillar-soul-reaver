@@ -667,9 +667,14 @@ internal static class NinthPillar
             AdjustSelected(+1, handle, sr1Base);
     }
 
-    // Freeze the game (its own pause flag) while our menu is open, so the D-pad/
-    // stick used to navigate the menu doesn't also move Raziel. Only unpause on
-    // close if WE were the ones who paused (don't clobber a real player pause).
+    // Freeze Raziel while our menu is open so the D-pad/stick used to navigate
+    // doesn't also move him. The pause flag alone only stops the time COUNTER
+    // (the update loop still runs, so Raziel keeps moving), so we also pin the
+    // game-time multiplier to ~0: with a zero-ish delta, movement and animation
+    // advance by nothing. We use 1 rather than 0 because PHYSICS divides by
+    // timeMult (0 would divide-by-zero and crash); 1 gives ~1/4096 speed =
+    // effectively frozen. The pause flag stops DoTimeProcess from recomputing
+    // timeMult, so our write sticks. Only unpause on close if WE paused.
     private static void ApplyMenuPause(IntPtr handle, IntPtr sr1Base)
     {
         if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
@@ -681,6 +686,7 @@ internal static class NinthPillar
                 menuPausedGame = (ReadInt(handle, gf) & PauseFlag) == 0;
             if (menuPausedGame)
                 WriteInt(handle, gf, ReadInt(handle, gf) | PauseFlag);
+            WriteInt(handle, Add(sr1Base, GameTimeMultRva), 1);
         }
         else if (menuWasOpenForPause && menuPausedGame)
         {
