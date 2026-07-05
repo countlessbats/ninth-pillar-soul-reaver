@@ -572,42 +572,56 @@ internal static class NinthPillar
         return IntPtr.Zero;
     }
 
-    // F10 is the only key: open/close the in-game menu. Everything else is
-    // navigated with the controller (see HandleMenuNav).
+    // F10 opens/closes the in-game menu. Navigation (D-pad / arrows / WASD) is
+    // handled in HandleMenuNav.
     private static void HandleKeys(IntPtr handle, IntPtr sr1Base)
     {
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
     }
 
-    // Controller navigation of the on-screen menu. D-pad Up/Down moves the
-    // highlight; Left/Right (or A) adjusts/toggles the highlighted option.
-    // Edge-detected so one press = one step. The game keeps running (no pause).
+    // Navigation of the on-screen menu, by controller OR keyboard. Up/Down (D-pad,
+    // arrows, or W/S) moves the highlight; Left/Right (D-pad, arrows, A/D, or the
+    // controller A button) adjusts/toggles the highlighted option. Edge-detected
+    // so one press = one step. The game keeps running (no pause).
+    private const int VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28;
+    private const int VK_A = 0x41, VK_D = 0x44, VK_S = 0x53, VK_W = 0x57;
+
     private static void HandleMenuNav(IntPtr handle, IntPtr sr1Base)
     {
         if (!menuOpen)
         {
             prevPad = 0;
+            // Flush keyboard edge state each closed frame so a WASD/arrow press
+            // made during play doesn't fire a nav step the moment the menu opens.
+            Pressed(VK_UP); Pressed(VK_W); Pressed(VK_DOWN); Pressed(VK_S);
+            Pressed(VK_LEFT); Pressed(VK_A); Pressed(VK_RIGHT); Pressed(VK_D);
             return;
         }
 
         ushort buttons = ReadAllButtons();
-
         ushort pressed = (ushort)(buttons & ~prevPad);
         prevPad = buttons;
+
+        // Bitwise | (not ||) so every Pressed() is evaluated and its edge bit
+        // consumed this frame, keeping keyboard edge detection clean.
+        bool up    = (pressed & PAD_UP) != 0    | Pressed(VK_UP)    | Pressed(VK_W);
+        bool down  = (pressed & PAD_DOWN) != 0   | Pressed(VK_DOWN)  | Pressed(VK_S);
+        bool left  = (pressed & PAD_LEFT) != 0   | Pressed(VK_LEFT)  | Pressed(VK_A);
+        bool right = (pressed & (PAD_RIGHT | PAD_A)) != 0 | Pressed(VK_RIGHT) | Pressed(VK_D);
 
         if ((pressed & PAD_B) != 0) // right face button (B / Circle) closes
         {
             menuOpen = false;
             return;
         }
-        if ((pressed & PAD_UP) != 0)
+        if (up)
             menuSel = (menuSel + MenuCount - 1) % MenuCount;
-        if ((pressed & PAD_DOWN) != 0)
+        if (down)
             menuSel = (menuSel + 1) % MenuCount;
-        if ((pressed & PAD_LEFT) != 0)
+        if (left)
             AdjustSelected(-1, handle, sr1Base);
-        if ((pressed & (PAD_RIGHT | PAD_A)) != 0)
+        if (right)
             AdjustSelected(+1, handle, sr1Base);
     }
 
@@ -1072,7 +1086,7 @@ internal static class NinthPillar
         sb.Append("   == NINTH PILLAR ==\n");
         for (int i = 0; i < MenuCount; i++)
             sb.Append((i == menuSel ? " > " : "   ") + lines[i] + "\n");
-        sb.Append("   D-pad move/adjust   (B/O) or F10 close\n");
+        sb.Append("   D-pad / arrows / WASD move+adjust   F10 close\n");
         return sb.ToString();
     }
 
