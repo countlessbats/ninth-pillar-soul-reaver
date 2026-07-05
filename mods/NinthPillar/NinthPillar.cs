@@ -83,6 +83,19 @@ internal static class NinthPillar
     private const int GlyphManaBallsRva = 0x2A88CE8; // unsigned short
     private const int GlyphManaMaxRva = 0x2A88CEA;   // unsigned short
 
+    // Raziel globals (verified live). Abilities holds ability bits; 0x40 is the
+    // "SHIFT ANY TIME" ability, 0x10 is swim (RAZIEL_OkToShift requires both to
+    // allow a spectral->material shift without a portal). HitPoints/invincible-
+    // Timer/CurrentPlane drive death; streamFlags 0x80000 makes the game loop
+    // run UNDERWORLD_StartProcess (Elder-God death) next frame.
+    private const int AbilitiesRva = 0x2A88CDC;
+    private const int HitPointsRva = 0x2A88CD0;
+    private const int InvincibleTimerRva = 0x2A88CD8;
+    private const int CurrentPlaneRva = 0x2A88D1C;
+    private const int StreamFlagsRva = 0x2A89510;
+    private const int ShiftAnyTimeMask = 0x50;    // shift-anytime (0x40) + swim (0x10)
+    private const int UnderworldStreamFlag = 0x80000;
+
     // Old diagnostic hook sites from earlier attempts; restored to original
     // bytes on attach so a game still carrying them gets cleaned up.
     private const int OldSndPlayVolPanRva = 0x0DC780;
@@ -102,7 +115,7 @@ internal static class NinthPillar
     private static int reaverIndex = 2;
     private static int sfxRateIndex = 3; // 4 per second
     private static bool menuOpen;
-    private const int MenuCount = 8;      // Turbo, Footsteps, Reaver, Invuln, Mana, BgSound, SpectralHP, ReviveHP
+    private const int MenuCount = 10;     // Turbo, Footsteps, Reaver, Invuln, Mana, BgSound, SpectralHP, ReviveHP, ShiftAny, Die
     private static int menuSel;           // highlighted option
     private static ushort prevPad;        // for D-pad edge detection
     // XInput button bits
@@ -130,6 +143,7 @@ internal static class NinthPillar
     private static string sfxHookStatus = "not installed";
     private static bool invulnerable;
     private static bool infiniteMana;
+    private static bool shiftAnywhere;
     // Mutes ONLY the game's own audio session while the game is unfocused
     // (verified: never touches other apps). On by default; toggle in F10 menu.
     private static bool muteInBackground = true;
@@ -369,6 +383,9 @@ internal static class NinthPillar
 
                 if (infiniteMana)
                     RefillMana(handle, sr1Base);
+
+                if (shiftAnywhere)
+                    ApplyShiftAnywhere(handle, sr1Base);
 
                 HandleMenuNav(handle, sr1Base);
                 UpdateOverlay(handle);
@@ -627,6 +644,55 @@ internal static class NinthPillar
                 fullHealthOnRevive = !fullHealthOnRevive;
                 ApplyFullHealthPatches(handle, sr1Base);
                 break;
+            case 8:
+                shiftAnywhere = !shiftAnywhere;
+                if (!shiftAnywhere)
+                {
+                    // Turn off: drop the shift-anytime bit (leave swim alone).
+                    int ab = ReadInt(handle, Add(sr1Base, AbilitiesRva));
+                    WriteInt(handle, Add(sr1Base, AbilitiesRva), ab & ~0x40);
+                }
+                break;
+            case 9:
+                // Die is an action, not a toggle: only fire on activate
+                // (Right / A), never on Left, to avoid accidental deaths.
+                if (dir > 0)
+                    DoDie(handle, sr1Base);
+                break;
+        }
+    }
+
+    // "SHIFT ANY TIME": pin the shift-anytime (0x40) + swim (0x10) ability bits
+    // so RAZIEL_OkToShift permits a spectral->material shift with no portal. The
+    // player still triggers the shift with the normal plane-shift input.
+    private static void ApplyShiftAnywhere(IntPtr handle, IntPtr sr1Base)
+    {
+        if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
+            return;
+        int ab = ReadInt(handle, Add(sr1Base, AbilitiesRva));
+        if ((ab & ShiftAnyTimeMask) != ShiftAnyTimeMask)
+            WriteInt(handle, Add(sr1Base, AbilitiesRva), ab | ShiftAnyTimeMask);
+    }
+
+    // Die: physical -> spectral (drop HitPoints below the material floor so the
+    // game's ProcessHealth plane-shifts next frame); spectral -> true death
+    // (set streamFlags 0x80000 so the game loop runs UNDERWORLD_StartProcess,
+    // i.e. respawn at the Elder God). Clears invincibleTimer so the shift isn't
+    // blocked. Anti-softlock escape hatch.
+    private static void DoDie(IntPtr handle, IntPtr sr1Base)
+    {
+        if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
+            return;
+        int plane = ReadInt(handle, Add(sr1Base, CurrentPlaneRva));
+        if (plane == 2)
+        {
+            int sf = ReadInt(handle, Add(sr1Base, StreamFlagsRva));
+            WriteInt(handle, Add(sr1Base, StreamFlagsRva), sf | UnderworldStreamFlag);
+        }
+        else if (plane == 1)
+        {
+            WriteInt(handle, Add(sr1Base, InvincibleTimerRva), 0);
+            WriteInt(handle, Add(sr1Base, HitPointsRva), 1);
         }
     }
 
@@ -998,6 +1064,8 @@ internal static class NinthPillar
             "Bg sound    " + (muteInBackground ? "muted" : "on"),
             "Spectral HP " + (fullHealthOnSpectral ? "full" : "base"),
             "Revive HP   " + (fullHealthOnRevive ? "full" : "base"),
+            "Shift Any   " + (shiftAnywhere ? "ON" : "off"),
+            "Die         (A)",
         };
         StringBuilder sb = new StringBuilder();
         sb.Append("$@EF\n");
