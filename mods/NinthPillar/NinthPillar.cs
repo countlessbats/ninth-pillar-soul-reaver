@@ -613,13 +613,12 @@ internal static class NinthPillar
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
 
-        // Controller open-binds: Options (Start) button, or L3+R3 together.
-        // Edge-detected so one press = one toggle.
+        // Controller open-bind: L3+R3 pressed together. Edge-detected so one
+        // press = one toggle. (Options is intentionally left alone so it still
+        // opens the game's own menu.)
         ushort b = ReadAllButtons();
-        ushort combo = 0;
-        if ((b & PAD_START) != 0) combo |= 1;
-        if ((b & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3)) combo |= 2;
-        if (((combo & ~prevOpenCombo) & 3) != 0)
+        ushort combo = ((b & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3)) ? (ushort)1 : (ushort)0;
+        if ((combo & ~prevOpenCombo) != 0)
             menuOpen = !menuOpen;
         prevOpenCombo = combo;
     }
@@ -1169,7 +1168,7 @@ internal static class NinthPillar
         sb.Append("   == NINTH PILLAR ==\n");
         for (int i = 0; i < MenuCount; i++)
             sb.Append((i == menuSel ? " > " : "   ") + lines[i] + "\n");
-        sb.Append("   Open: F10 / Options / L3+R3    Move: D-pad/arrows/WASD\n");
+        sb.Append("   Open: F10 / L3+R3    Move: D-pad / arrows / WASD\n");
         return sb.ToString();
     }
 
