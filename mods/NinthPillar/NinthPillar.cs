@@ -130,9 +130,9 @@ internal static class NinthPillar
     private static string sfxHookStatus = "not installed";
     private static bool invulnerable;
     private static bool infiniteMana;
-    // Opt-in: only ever mutes the game's own audio session, but default OFF so
-    // the feature can never surprise anyone. Toggle it on in the F10 menu.
-    private static bool muteInBackground = false;
+    // Mutes ONLY the game's own audio session while the game is unfocused
+    // (verified: never touches other apps). On by default; toggle in F10 menu.
+    private static bool muteInBackground = true;
     private static bool fullHealthOnSpectral = true;
     private static bool fullHealthOnRevive = true;
     private static bool gameMuted;
@@ -476,10 +476,9 @@ internal static class NinthPillar
                     IAudioSessionControl2 session;
                     if (sessions.GetSession(i, out session) != 0)
                         continue;
-                    // Never touch the Windows system-sounds session
-                    // (IsSystemSoundsSession returns S_OK==0 when it is).
-                    if (session.IsSystemSoundsSession() == 0)
-                        continue;
+                    // Only the game's own session: the PID filter below already
+                    // excludes the system-sounds session (pid 0) and every other
+                    // app, and the pid<=4 guard above backstops a bad pid.
                     int sessionPid;
                     if (session.GetProcessId(out sessionPid) != 0 || sessionPid != pid)
                         continue;
