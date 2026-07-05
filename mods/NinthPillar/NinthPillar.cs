@@ -100,6 +100,12 @@ internal static class NinthPillar
     private const int CurrentPlaneRva = 0x2A88D1C;
     private const int ControlFlagRva = 0x2A88568;  // player state flags; 0x800000 = dying
     private const int ShiftAnyTimeMask = 0x50;    // shift-anytime (0x40) + swim (0x10)
+    // gameTrackerX.gameFlags (base 0x2A892C0; immediately before streamFlags).
+    // 0x10000000 is the game's own pause bit (GAMELOOP pause routine sets it and
+    // time-advance is gated on it) -> we set it to freeze Raziel while the menu
+    // is open, so menu D-pad/stick input doesn't also move him.
+    private const int GameFlagsRva = 0x2A8950C;
+    private const int PauseFlag = 0x10000000;
 
     // Old diagnostic hook sites from earlier attempts; restored to original
     // bytes on attach so a game still carrying them gets cleaned up.
@@ -123,9 +129,13 @@ internal static class NinthPillar
     private const int MenuCount = 10;     // Turbo, Footsteps, Reaver, Invuln, Mana, BgSound, SpectralHP, ReviveHP, ShiftAny, Die
     private static int menuSel;           // highlighted option
     private static ushort prevPad;        // for D-pad edge detection
+    private static ushort prevOpenCombo;  // edge detection for controller open-binds
+    private static bool menuPausedGame;   // did WE set the pause bit
+    private static bool menuWasOpenForPause;
     // XInput button bits
     private const int PAD_UP = 0x0001, PAD_DOWN = 0x0002, PAD_LEFT = 0x0004,
-                      PAD_RIGHT = 0x0008, PAD_A = 0x1000, PAD_B = 0x2000;
+                      PAD_RIGHT = 0x0008, PAD_START = 0x0010,
+                      PAD_L3 = 0x0040, PAD_R3 = 0x0080, PAD_A = 0x1000, PAD_B = 0x2000;
     private static bool running = true;
     private static bool lastTurbo;
     private static byte lastR2;
@@ -395,6 +405,7 @@ internal static class NinthPillar
                     ApplyShiftAnywhere(handle, sr1Base);
 
                 HandleMenuNav(handle, sr1Base);
+                ApplyMenuPause(handle, sr1Base);
                 UpdateOverlay(handle);
             }
             else
@@ -596,10 +607,21 @@ internal static class NinthPillar
         if (!IsGameFocused())
         {
             Pressed(0x79); // consume the F10 edge so it can't toggle on refocus
+            prevOpenCombo = 0;
             return;
         }
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
+
+        // Controller open-binds: Options (Start) button, or L3+R3 together.
+        // Edge-detected so one press = one toggle.
+        ushort b = ReadAllButtons();
+        ushort combo = 0;
+        if ((b & PAD_START) != 0) combo |= 1;
+        if ((b & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3)) combo |= 2;
+        if (((combo & ~prevOpenCombo) & 3) != 0)
+            menuOpen = !menuOpen;
+        prevOpenCombo = combo;
     }
 
     // Navigation of the on-screen menu, by controller OR keyboard. Up/Down (D-pad,
@@ -645,6 +667,29 @@ internal static class NinthPillar
             AdjustSelected(-1, handle, sr1Base);
         if (right)
             AdjustSelected(+1, handle, sr1Base);
+    }
+
+    // Freeze the game (its own pause flag) while our menu is open, so the D-pad/
+    // stick used to navigate the menu doesn't also move Raziel. Only unpause on
+    // close if WE were the ones who paused (don't clobber a real player pause).
+    private static void ApplyMenuPause(IntPtr handle, IntPtr sr1Base)
+    {
+        if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
+            return;
+        IntPtr gf = Add(sr1Base, GameFlagsRva);
+        if (menuOpen)
+        {
+            if (!menuWasOpenForPause)
+                menuPausedGame = (ReadInt(handle, gf) & PauseFlag) == 0;
+            if (menuPausedGame)
+                WriteInt(handle, gf, ReadInt(handle, gf) | PauseFlag);
+        }
+        else if (menuWasOpenForPause && menuPausedGame)
+        {
+            WriteInt(handle, gf, ReadInt(handle, gf) & ~PauseFlag);
+            menuPausedGame = false;
+        }
+        menuWasOpenForPause = menuOpen;
     }
 
     private static void AdjustSelected(int dir, IntPtr handle, IntPtr sr1Base)
@@ -891,6 +936,9 @@ internal static class NinthPillar
                 if ((b & GamepadButtons.DPadRight) != 0) buttons |= PAD_RIGHT;
                 if ((b & GamepadButtons.A) != 0) buttons |= PAD_A;
                 if ((b & GamepadButtons.B) != 0) buttons |= PAD_B;
+                if ((b & GamepadButtons.Menu) != 0) buttons |= PAD_START;          // Options / Start
+                if ((b & GamepadButtons.LeftThumbstick) != 0) buttons |= PAD_L3;
+                if ((b & GamepadButtons.RightThumbstick) != 0) buttons |= PAD_R3;
             }
         }
         catch
@@ -1121,7 +1169,7 @@ internal static class NinthPillar
         sb.Append("   == NINTH PILLAR ==\n");
         for (int i = 0; i < MenuCount; i++)
             sb.Append((i == menuSel ? " > " : "   ") + lines[i] + "\n");
-        sb.Append("   D-pad / arrows / WASD move+adjust   F10 close\n");
+        sb.Append("   Open: F10 / Options / L3+R3    Move: D-pad/arrows/WASD\n");
         return sb.ToString();
     }
 
