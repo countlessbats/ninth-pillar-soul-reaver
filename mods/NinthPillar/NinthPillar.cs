@@ -88,7 +88,13 @@ internal static class NinthPillar
     // allow a spectral->material shift without a portal). HitPoints/invincible-
     // Timer/CurrentPlane drive death; streamFlags 0x80000 makes the game loop
     // run UNDERWORLD_StartProcess (Elder-God death) next frame.
-    private const int AbilitiesRva = 0x2A88CDC;
+    // Shift-anytime must be set on debugRazielFlags1 (the debug "source" the game
+    // copies into Raziel.Abilities every frame in RazielProcess). Poking Abilities
+    // directly just gets overwritten each frame -> the value oscillates and the
+    // shift-glyph icon flickers. debugRazielFlags1 RVA verified via the debug menu
+    // table's "SHIFT ANY TIME" entry (mask 0x50). Setting it is steady, exactly
+    // like the game's own debug toggle.
+    private const int DebugRazielFlags1Rva = 0x3B0D480;
     private const int HitPointsRva = 0x2A88CD0;
     private const int InvincibleTimerRva = 0x2A88CD8;
     private const int CurrentPlaneRva = 0x2A88D1C;
@@ -662,9 +668,10 @@ internal static class NinthPillar
                 shiftAnywhere = !shiftAnywhere;
                 if (!shiftAnywhere)
                 {
-                    // Turn off: drop the shift-anytime bit (leave swim alone).
-                    int ab = ReadInt(handle, Add(sr1Base, AbilitiesRva));
-                    WriteInt(handle, Add(sr1Base, AbilitiesRva), ab & ~0x40);
+                    // Turn off: drop the shift-anytime bit from the debug source
+                    // (leave swim alone). The game copies this into Abilities.
+                    int df = ReadInt(handle, Add(sr1Base, DebugRazielFlags1Rva));
+                    WriteInt(handle, Add(sr1Base, DebugRazielFlags1Rva), df & ~0x40);
                 }
                 break;
             case 9:
@@ -676,16 +683,19 @@ internal static class NinthPillar
         }
     }
 
-    // "SHIFT ANY TIME": pin the shift-anytime (0x40) + swim (0x10) ability bits
-    // so RAZIEL_OkToShift permits a spectral->material shift with no portal. The
-    // player still triggers the shift with the normal plane-shift input.
+    // "SHIFT ANY TIME": pin the shift-anytime (0x40) + swim (0x10) bits on the
+    // debug source flags so the game copies them into Raziel.Abilities steadily
+    // each frame (RAZIEL_OkToShift then permits a spectral->material shift with no
+    // portal). The player still triggers the shift with the normal plane-shift
+    // input. Writing debugRazielFlags1 (not Abilities) avoids the per-frame
+    // overwrite that made the shift-glyph icon flicker.
     private static void ApplyShiftAnywhere(IntPtr handle, IntPtr sr1Base)
     {
         if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
             return;
-        int ab = ReadInt(handle, Add(sr1Base, AbilitiesRva));
-        if ((ab & ShiftAnyTimeMask) != ShiftAnyTimeMask)
-            WriteInt(handle, Add(sr1Base, AbilitiesRva), ab | ShiftAnyTimeMask);
+        int df = ReadInt(handle, Add(sr1Base, DebugRazielFlags1Rva));
+        if ((df & ShiftAnyTimeMask) != ShiftAnyTimeMask)
+            WriteInt(handle, Add(sr1Base, DebugRazielFlags1Rva), df | ShiftAnyTimeMask);
     }
 
     // Die: physical -> spectral (drop HitPoints below the material floor so the
