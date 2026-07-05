@@ -134,7 +134,7 @@ internal static class NinthPillar
     private static bool menuWasOpenForPause;
     // XInput button bits
     private const int PAD_UP = 0x0001, PAD_DOWN = 0x0002, PAD_LEFT = 0x0004,
-                      PAD_RIGHT = 0x0008, PAD_START = 0x0010,
+                      PAD_RIGHT = 0x0008, PAD_START = 0x0010, PAD_SELECT = 0x0020,
                       PAD_L3 = 0x0040, PAD_R3 = 0x0080, PAD_A = 0x1000, PAD_B = 0x2000;
     private static bool running = true;
     private static bool lastTurbo;
@@ -613,11 +613,12 @@ internal static class NinthPillar
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
 
-        // Controller open-bind: L3+R3 pressed together. Edge-detected so one
-        // press = one toggle. (Options is intentionally left alone so it still
-        // opens the game's own menu.)
+        // Controller open-bind: Start + Select held together (a chord that
+        // doesn't collide with gameplay; L3+R3 is the game's camera mode).
+        // Edge-detected so one press = one toggle. Start alone still opens the
+        // game's own menu.
         ushort b = ReadAllButtons();
-        ushort combo = ((b & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3)) ? (ushort)1 : (ushort)0;
+        ushort combo = ((b & PAD_START) != 0 && (b & PAD_SELECT) != 0) ? (ushort)1 : (ushort)0;
         if ((combo & ~prevOpenCombo) != 0)
             menuOpen = !menuOpen;
         prevOpenCombo = combo;
@@ -936,6 +937,7 @@ internal static class NinthPillar
                 if ((b & GamepadButtons.A) != 0) buttons |= PAD_A;
                 if ((b & GamepadButtons.B) != 0) buttons |= PAD_B;
                 if ((b & GamepadButtons.Menu) != 0) buttons |= PAD_START;          // Options / Start
+                if ((b & GamepadButtons.View) != 0) buttons |= PAD_SELECT;         // Create / Share / Back
                 if ((b & GamepadButtons.LeftThumbstick) != 0) buttons |= PAD_L3;
                 if ((b & GamepadButtons.RightThumbstick) != 0) buttons |= PAD_R3;
             }
@@ -1168,7 +1170,7 @@ internal static class NinthPillar
         sb.Append("   == NINTH PILLAR ==\n");
         for (int i = 0; i < MenuCount; i++)
             sb.Append((i == menuSel ? " > " : "   ") + lines[i] + "\n");
-        sb.Append("   Open: F10 / L3+R3    Move: D-pad / arrows / WASD\n");
+        sb.Append("   Open: F10 / Start+Select    Move: D-pad / arrows / WASD\n");
         return sb.ToString();
     }
 
