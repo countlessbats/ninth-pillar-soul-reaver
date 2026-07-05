@@ -133,7 +133,7 @@ function Ensure-Artifacts([string] $gameDir) {
     return $launcherOut
 }
 
-function Install-Ninth Pillar([string] $gameDir) {
+function Install-NinthPillar([string] $gameDir) {
     Ensure-NotRunning
 
     $modDir = Join-Path $gameDir 'mods\NinthPillar'
@@ -177,7 +177,7 @@ function Install-Ninth Pillar([string] $gameDir) {
     Write-Host 'Installed. Steam will now start NinthPillar with Soul Reaver.' -ForegroundColor Green
 }
 
-function Uninstall-Ninth Pillar([string] $gameDir) {
+function Uninstall-NinthPillar([string] $gameDir) {
     Ensure-NotRunning
 
     $modDir = Join-Path $gameDir 'mods\NinthPillar'
@@ -222,10 +222,10 @@ try {
     Write-Host "Soul Reaver folder: $gameDir"
     if ((Test-Path -LiteralPath $real) -and (Test-Path -LiteralPath $srx)) {
         Write-Host 'Existing install detected; uninstalling...'
-        Uninstall-Ninth Pillar $gameDir
+        Uninstall-NinthPillar $gameDir
     } else {
         Write-Host 'No install detected; installing...'
-        Install-Ninth Pillar $gameDir
+        Install-NinthPillar $gameDir
     }
 } catch {
     Write-Host ''
