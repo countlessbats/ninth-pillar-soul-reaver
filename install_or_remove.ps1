@@ -38,36 +38,42 @@ function Test-GameDir([string] $dir) {
 }
 
 function Resolve-GameDir([string] $candidate) {
-    $p = Normalize-PastedPath $candidate
-    if ([string]::IsNullOrWhiteSpace($p)) { return $null }
+    # Never throws: any bad input just yields $null so the caller can keep asking.
+    try {
+        $p = Normalize-PastedPath $candidate
+        if ([string]::IsNullOrWhiteSpace($p)) { return $null }
 
-    if (Test-Path -LiteralPath $p -PathType Leaf) {
-        if ([IO.Path]::GetFileName($p).Equals('SRX.exe', [StringComparison]::OrdinalIgnoreCase) -or
-            [IO.Path]::GetFileName($p).Equals($RealExeName, [StringComparison]::OrdinalIgnoreCase)) {
+        # If they handed us a FILE (SRX.exe, the backup exe, install_or_remove.*,
+        # or anything else inside the folder), use its containing folder.
+        if (Test-Path -LiteralPath $p -PathType Leaf) {
             $p = Get-ParentDir $p
         }
-    }
+        if ([string]::IsNullOrWhiteSpace($p)) { return $null }
 
-    try {
+        # -LiteralPath throughout: spaces, parentheses and [] are all taken
+        # literally (no globbing), so those paths work fine.
         $resolved = Resolve-Path -LiteralPath $p -ErrorAction Stop
         $p = $resolved.ProviderPath
+
+        if (Test-GameDir $p) { return $p }
+        return $null
     } catch {
         return $null
     }
-
-    if (Test-GameDir $p) { return $p }
-    return $null
 }
 
 function Find-GameDir {
+    # Build the auto-detect list defensively so a missing env var (e.g. a null
+    # ProgramFiles(x86)) can never throw before we get a chance to prompt.
     $scriptDir = Get-ParentDir $PSCommandPath
-    $candidates = @(
-        $scriptDir,
-        (Get-Location).ProviderPath,
-        (Get-ParentDir $scriptDir),
-        (Join-Path ${env:ProgramFiles(x86)} 'Steam\steamapps\common\Soul Reaver I-II'),
-        (Join-Path $env:ProgramFiles 'Steam\steamapps\common\Soul Reaver I-II')
-    )
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($scriptDir) { $candidates.Add($scriptDir) }
+    try { $candidates.Add((Get-Location).ProviderPath) } catch {}
+    $parent = Get-ParentDir $scriptDir
+    if ($parent) { $candidates.Add($parent) }
+    foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if ($pf) { $candidates.Add((Join-Path $pf 'Steam\steamapps\common\Soul Reaver I-II')) }
+    }
 
     foreach ($candidate in $candidates) {
         $found = Resolve-GameDir $candidate
@@ -77,11 +83,15 @@ function Find-GameDir {
     while ($true) {
         Write-Host ''
         Write-Host 'Could not find Soul Reaver I-II automatically.'
-        Write-Host 'Paste the game folder path, or the SRX.exe path.'
+        Write-Host 'Paste the game folder path (or the path to SRX.exe). Quotes are OK;'
+        Write-Host 'spaces and parentheses are fine. Type Q to cancel.'
         $pasted = Read-Host 'Path'
+        if ($null -ne $pasted -and $pasted.Trim().Equals('Q', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Cancelled: no game folder provided.'
+        }
         $found = Resolve-GameDir $pasted
         if ($found) { return $found }
-        Write-Host 'That did not look like the Soul Reaver I-II folder. Try again.' -ForegroundColor Yellow
+        Write-Host 'That is not the Soul Reaver I-II folder (needs 1\sr1.dll and SRX.exe). Try again.' -ForegroundColor Yellow
     }
 }
 
