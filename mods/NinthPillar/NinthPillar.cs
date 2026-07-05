@@ -613,12 +613,10 @@ internal static class NinthPillar
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
 
-        // Controller open-bind: Start + Select held together (a chord that
-        // doesn't collide with gameplay; L3+R3 is the game's camera mode).
-        // Edge-detected so one press = one toggle. Start alone still opens the
-        // game's own menu.
-        ushort b = ReadAllButtons();
-        ushort combo = ((b & PAD_START) != 0 && (b & PAD_SELECT) != 0) ? (ushort)1 : (ushort)0;
+        // Controller open/close bind: L2 + R2 pulled together (both analog
+        // triggers past threshold, on the same pad). Edge-detected so one pull =
+        // one toggle. R2 alone is turbo; both triggers together is the menu.
+        ushort combo = BothTriggersDown() ? (ushort)1 : (ushort)0;
         if ((combo & ~prevOpenCombo) != 0)
             menuOpen = !menuOpen;
         prevOpenCombo = combo;
@@ -911,6 +909,33 @@ internal static class NinthPillar
         catch { return XInputGetState910(i, out state); }
     }
 
+    // True when L2 AND R2 are pulled past threshold on the SAME pad (so R2-alone
+    // turbo never trips it). Checks XInput triggers and Windows.Gaming.Input.
+    private static bool BothTriggersDown()
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            XINPUT_STATE st;
+            if (TryXInput(i, out st) == 0 &&
+                st.Gamepad.bLeftTrigger > 40 && st.Gamepad.bRightTrigger > 40)
+                return true;
+        }
+        try
+        {
+            var pads = Gamepad.Gamepads;
+            for (int i = 0; i < pads.Count; i++)
+            {
+                GamepadReading r = pads[i].GetCurrentReading();
+                if (r.LeftTrigger > 0.15 && r.RightTrigger > 0.15)
+                    return true;
+            }
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
     // OR the button bits across every connected pad (XInput slots + WGI), so
     // menu navigation works no matter which controller/slot is live. WGI buttons
     // are mapped into the XInput bit layout used by the PAD_* constants.
@@ -1170,7 +1195,7 @@ internal static class NinthPillar
         sb.Append("   == NINTH PILLAR ==\n");
         for (int i = 0; i < MenuCount; i++)
             sb.Append((i == menuSel ? " > " : "   ") + lines[i] + "\n");
-        sb.Append("   Open: F10 / Start+Select    Move: D-pad / arrows / WASD\n");
+        sb.Append("   Open: F10 / L2+R2    Move: D-pad / arrows / WASD\n");
         return sb.ToString();
     }
 
