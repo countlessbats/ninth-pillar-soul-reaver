@@ -98,9 +98,8 @@ internal static class NinthPillar
     private const int HitPointsRva = 0x2A88CD0;
     private const int InvincibleTimerRva = 0x2A88CD8;
     private const int CurrentPlaneRva = 0x2A88D1C;
-    private const int StreamFlagsRva = 0x2A89510;
+    private const int ControlFlagRva = 0x2A88568;  // player state flags; 0x800000 = dying
     private const int ShiftAnyTimeMask = 0x50;    // shift-anytime (0x40) + swim (0x10)
-    private const int UnderworldStreamFlag = 0x80000;
 
     // Old diagnostic hook sites from earlier attempts; restored to original
     // bytes on attach so a game still carrying them gets cleaned up.
@@ -159,6 +158,7 @@ internal static class NinthPillar
     private static int mutedPid;
     private static int lastMuteAttemptTick;
     private static readonly int helperPid = Process.GetCurrentProcess().Id;
+    private static int gamePid;
     private static bool wasR2Down;
     private static bool wasStickMoving;
     private static bool turboArmed;
@@ -353,6 +353,7 @@ internal static class NinthPillar
                         ApplyOverlayHook(handle, sr1Base);
                         lastStatus = "Attached to SRX.exe.";
                         uiAttached = true;
+                        gamePid = proc.Id;
                     }
                 }
             }
@@ -578,10 +579,25 @@ internal static class NinthPillar
         return IntPtr.Zero;
     }
 
+    // True only when the game window itself is in the foreground, so menu input
+    // is ignored when the game is alt-tabbed to the background (otherwise our
+    // global key/pad reads would act on keystrokes meant for other apps).
+    private static bool IsGameFocused()
+    {
+        int fg;
+        GetWindowThreadProcessId(GetForegroundWindow(), out fg);
+        return fg != 0 && fg == gamePid;
+    }
+
     // F10 opens/closes the in-game menu. Navigation (D-pad / arrows / WASD) is
-    // handled in HandleMenuNav.
+    // handled in HandleMenuNav. Both are gated on the game being focused.
     private static void HandleKeys(IntPtr handle, IntPtr sr1Base)
     {
+        if (!IsGameFocused())
+        {
+            Pressed(0x79); // consume the F10 edge so it can't toggle on refocus
+            return;
+        }
         if (Pressed(0x79)) // F10
             menuOpen = !menuOpen;
     }
@@ -595,11 +611,11 @@ internal static class NinthPillar
 
     private static void HandleMenuNav(IntPtr handle, IntPtr sr1Base)
     {
-        if (!menuOpen)
+        if (!menuOpen || !IsGameFocused())
         {
             prevPad = 0;
-            // Flush keyboard edge state each closed frame so a WASD/arrow press
-            // made during play doesn't fire a nav step the moment the menu opens.
+            // Flush keyboard edge state while closed/unfocused so a WASD/arrow
+            // press made elsewhere doesn't fire a nav step on open/refocus.
             Pressed(VK_UP); Pressed(VK_W); Pressed(VK_DOWN); Pressed(VK_S);
             Pressed(VK_LEFT); Pressed(VK_A); Pressed(VK_RIGHT); Pressed(VK_D);
             return;
@@ -708,14 +724,23 @@ internal static class NinthPillar
         if (handle == IntPtr.Zero || sr1Base == IntPtr.Zero)
             return;
         int plane = ReadInt(handle, Add(sr1Base, CurrentPlaneRva));
+        WriteInt(handle, Add(sr1Base, InvincibleTimerRva), 0);
         if (plane == 2)
         {
-            int sf = ReadInt(handle, Add(sr1Base, StreamFlagsRva));
-            WriteInt(handle, Add(sr1Base, StreamFlagsRva), sf | UnderworldStreamFlag);
+            // Spectral -> true death. Drive it through the game's own ProcessHealth
+            // death path, which sets up ALL death state and runs UNDERWORLD_Start-
+            // Process safely on the game thread. Pre-set the "dying" ControlFlag bit
+            // (0x800000) so the low-health clamp is skipped, then force HP < 0.
+            // NB: poking streamFlags 0x80000 directly CRASHED the game (UNDERWORLD
+            // ran with half-initialized state), so we never do that.
+            int cf = ReadInt(handle, Add(sr1Base, ControlFlagRva));
+            WriteInt(handle, Add(sr1Base, ControlFlagRva), cf | 0x800000);
+            WriteInt(handle, Add(sr1Base, HitPointsRva), -1);
         }
         else if (plane == 1)
         {
-            WriteInt(handle, Add(sr1Base, InvincibleTimerRva), 0);
+            // Material -> spectral: ProcessHealth plane-shifts when HP < the
+            // material floor.
             WriteInt(handle, Add(sr1Base, HitPointsRva), 1);
         }
     }
@@ -1084,7 +1109,7 @@ internal static class NinthPillar
             "Footsteps   " + SfxPerSecond[sfxRateIndex] + "/s",
             "Reaver      " + rv,
             "Invuln      " + (invulnerable ? "ON" : "off"),
-            "Mana        " + (infiniteMana ? "ON" : "off"),
+            "Mana        " + (infiniteMana ? "Inf" : "Normal"),
             "Bg sound    " + (muteInBackground ? "muted" : "on"),
             "Spectral HP " + (fullHealthOnSpectral ? "full" : "base"),
             "Revive HP   " + (fullHealthOnRevive ? "full" : "base"),
