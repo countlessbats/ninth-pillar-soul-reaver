@@ -167,6 +167,7 @@ internal static class NinthPillar
     private static bool gameMuted;
     private static int mutedPid;
     private static int lastMuteAttemptTick;
+    private static volatile bool muteOpPending;   // a WASAPI mute call is in flight on a bg thread
     private static readonly int helperPid = Process.GetCurrentProcess().Id;
     private static int gamePid;
     private static bool wasR2Down;
@@ -364,6 +365,14 @@ internal static class NinthPillar
                         lastStatus = "Attached to SRX.exe.";
                         uiAttached = true;
                         gamePid = proc.Id;
+                        // Self-heal: a previous helper may have died with the menu
+                        // open, leaving the game paused. Reset our freeze state and
+                        // clear the game's pause bit so it isn't stuck frozen.
+                        menuOpen = false;
+                        menuWasOpenForPause = false;
+                        menuPausedGame = false;
+                        WriteInt(handle, Add(sr1Base, GameFlagsRva),
+                            ReadInt(handle, Add(sr1Base, GameFlagsRva)) & ~PauseFlag);
                     }
                 }
             }
@@ -459,11 +468,32 @@ internal static class NinthPillar
             return;
         lastMuteAttemptTick = now;
 
-        if (SetMuteAll(proc.Id, shouldMute))
+        // Run the WASAPI mute OFF the main loop: these COM calls can block, and
+        // a blocked main loop would leave the game frozen (pause/timeMult held).
+        // One op in flight at a time.
+        if (muteOpPending)
+            return;
+        int pid = proc.Id;
+        bool target = shouldMute;
+        muteOpPending = true;
+        System.Threading.ThreadPool.QueueUserWorkItem(delegate
         {
-            gameMuted = shouldMute;
-            mutedPid = proc.Id;
-        }
+            try
+            {
+                if (SetMuteAll(pid, target))
+                {
+                    gameMuted = target;
+                    mutedPid = pid;
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                muteOpPending = false;
+            }
+        });
     }
 
     // The game's session is not necessarily on the default endpoint (observed
